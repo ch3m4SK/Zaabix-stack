@@ -1,6 +1,4 @@
-version: "3.9"
-
-name: zabbix-stack
+version: "3.8"
 
 services:
   mysql:
@@ -42,7 +40,7 @@ services:
       ZBX_STARTPOLLERS: ${ZBX_STARTPOLLERS:-10}
       ZBX_TIMEOUT: ${ZBX_TIMEOUT:-10}
     ports:
-      - "10051:10051"   # Zabbix trapper/active checks
+      - "10051:10051"
     volumes:
       - ./zbx/alertscripts:/usr/lib/zabbix/alertscripts:rw
       - ./zbx/externalscripts:/usr/lib/zabbix/externalscripts:rw
@@ -50,11 +48,6 @@ services:
       - ./zbx/mibs:/var/lib/zabbix/mibs:rw
     networks:
       - zbx-net
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/10051' || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
 
   zabbix-web:
     image: zabbix/zabbix-web-nginx-mysql:alpine-7.0-latest
@@ -72,12 +65,9 @@ services:
       ZBX_SERVER_HOST: zabbix-server
       ZBX_SERVER_NAME: ${ZBX_SERVER_NAME:-Zabbix}
       PHP_TZ: ${PHP_TZ:-Europe/Madrid}
-      # Opcional para HTTPS interno del contenedor:
-      # ZBX_SSLVERIFYHOST: "0"
-      # ZBX_SSLVERIFYPEER: "0"
     ports:
-      - "8080:8080"   # HTTP (web UI)
-      - "8443:8443"   # HTTPS (web UI, opcional)
+      - "8080:8080"
+      - "8443:8443"
     networks:
       - zbx-net
     healthcheck:
@@ -95,7 +85,6 @@ services:
       ZBX_HOSTNAME: ${ZBX_AGENT_HOSTNAME:-docker-host}
     networks:
       - zbx-net
-    # Si quieres monitorizar el host Docker:
     # privileged: true
     # volumes:
     #   - /:/rootfs:ro
