@@ -3,12 +3,10 @@ pipeline {
 
   options {
     timestamps()
-    ansiColor('xterm')
     disableConcurrentBuilds()
   }
 
   triggers {
-    // Requiere el GitHub plugin y el webhook configurado en el repo
     githubPush()
   }
 
@@ -27,14 +25,11 @@ pipeline {
   }
 
   environment {
-    // Ruta donde vive el compose (el workspace del job)
     COMPOSE_PROJECT_DIR = "${env.WORKSPACE}"
-    // Comando docker compose (ajústalo si tu CLI es diferente)
     DOCKER_COMPOSE = "docker compose"
   }
 
   stages {
-
     stage('Checkout') {
       steps {
         checkout scm
@@ -54,16 +49,11 @@ pipeline {
 
     stage('Preparar directorios (bind mounts)') {
       steps {
-        sh '''
-          mkdir -p zbx/alertscripts zbx/externalscripts zbx/snmptraps zbx/mibs
-        '''
+        sh 'mkdir -p zbx/alertscripts zbx/externalscripts zbx/snmptraps zbx/mibs'
       }
     }
 
     stage('Escribir .env') {
-      environment {
-        // Inyectar secretos desde el almacén de credenciales de Jenkins
-      }
       steps {
         withCredentials([
           string(credentialsId: 'zbx_db_pass', variable: 'SECRET_DB_PASS'),
@@ -92,9 +82,7 @@ EOF
 
     stage('Pull imágenes') {
       steps {
-        sh '''
-          ${DOCKER_COMPOSE} -f docker-compose.yml --project-directory "${COMPOSE_PROJECT_DIR}" pull
-        '''
+        sh '${DOCKER_COMPOSE} -f docker-compose.yml --project-directory "${COMPOSE_PROJECT_DIR}" pull'
       }
     }
 
@@ -111,7 +99,6 @@ EOF
       steps {
         sh """
           echo 'Comprobando UI en http://localhost:${WEB_PORT} ...'
-          # Espera progresiva hasta 2 min
           for i in \$(seq 1 24); do
             if curl -fsS http://localhost:${WEB_PORT}/ >/dev/null; then
               echo 'UI OK'
@@ -138,7 +125,6 @@ EOF
       echo "Fallo en el despliegue. Revisa los logs anteriores."
     }
     always {
-      // Muestra estado final
       sh '${DOCKER_COMPOSE} ps || true'
     }
   }
