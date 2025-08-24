@@ -1,111 +1,81 @@
 pipeline {
   agent any
 
-  options {
-    timestamps()
-    disableConcurrentBuilds()
-  }
-
-  triggers {
-    githubPush()
-  }
-
-  parameters {
-    string(name: 'DB_NAME', defaultValue: 'zabbix', description: 'Nombre de la BD')
-    string(name: 'DB_USER', defaultValue: 'zabbix', description: 'Usuario de la BD')
-    string(name: 'PHP_TZ', defaultValue: 'Europe/Madrid', description: 'Timezone PHP')
-    string(name: 'ZBX_SERVER_NAME', defaultValue: 'Zabbix Prod', description: 'Nombre mostrado en UI')
-    string(name: 'ZBX_DEBUGLEVEL', defaultValue: '3', description: 'Nivel log server (0-5)')
-    string(name: 'ZBX_STARTDISCOVERERS', defaultValue: '3', description: 'Discoverers')
-    string(name: 'ZBX_STARTPOLLERS', defaultValue: '10', description: 'Pollers')
-    string(name: 'ZBX_TIMEOUT', defaultValue: '10', description: 'Timeout Zabbix server')
-    string(name: 'ZBX_AGENT_HOSTNAME', defaultValue: 'docker-host', description: 'Hostname del agent2')
-    string(name: 'WEB_PORT', defaultValue: '8080', description: 'Puerto HTTP de Zabbix Web (host)')
-    string(name: 'WEB_TLS_PORT', defaultValue: '8443', description: 'Puerto HTTPS de Zabbix Web (host)')
-  }
-
   environment {
-    COMPOSE_PROJECT_DIR = "${env.WORKSPACE}"
-    DOCKER_COMPOSE = "docker compose"
+    DEPLOY_PATH = '/opt/zabbix-stack'
   }
 
   stages {
-    stage('Checkout') {
+    stage('Preparar carpeta') {
       steps {
-        checkout scm
-        sh 'git rev-parse --short HEAD || true'
+        sh """
+          mkdir -p $DEPLOY_PATH
+          mkdir -p $DEPLOY_PATH/zbx/alertscripts \
+                   $DEPLOY_PATH/zbx/externalscripts \
+                   $DEPLOY_PATH/zbx/snmptraps \
+                   $DEPLOY_PATH/zbx/mibs
+        """
       }
     }
 
-    stage('Preflight: docker y compose') {
+    stage('Copiar archivos') {
       steps {
-        sh '''
-          set -e
-          docker version
-          ${DOCKER_COMPOSE} version
-        '''
+        sh """
+          cp docker-compose.yml $DEPLOY_PATH/
+          # (opcional) copia docs/scripts si los quieres en el host
+          [ -d scripts ] && cp -r scripts $DEPLOY_PATH/ || true
+          [ -f .env.example ] && cp .env.example $DEPLOY_PATH/.env || true
+        """
       }
     }
 
-    stage('Preparar directorios (bind mounts)') {
-      steps {
-        sh 'mkdir -p zbx/alertscripts zbx/externalscripts zbx/snmptraps zbx/mibs'
-      }
-    }
-
-    stage('Escribir .env') {
+    stage('Escribir .env con credenciales') {
       steps {
         withCredentials([
-          string(credentialsId: 'zbx_db_pass', variable: 'SECRET_DB_PASS'),
+          string(credentialsId: 'zbx_db_pass',      variable: 'SECRET_DB_PASS'),
           string(credentialsId: 'zbx_db_root_pass', variable: 'SECRET_DB_ROOT_PASS')
         ]) {
-          sh '''
-            cat > .env <<EOF
-DB_NAME=${DB_NAME}
-DB_USER=${DB_USER}
+          sh """
+            cat > $DEPLOY_PATH/.env <<EOF
+DB_NAME=zabbix
+DB_USER=zabbix
 DB_PASS=${SECRET_DB_PASS}
 DB_ROOT_PASS=${SECRET_DB_ROOT_PASS}
-ZBX_SERVER_NAME=${ZBX_SERVER_NAME}
-PHP_TZ=${PHP_TZ}
-ZBX_DEBUGLEVEL=${ZBX_DEBUGLEVEL}
-ZBX_STARTDISCOVERERS=${ZBX_STARTDISCOVERERS}
-ZBX_STARTPOLLERS=${ZBX_STARTPOLLERS}
-ZBX_TIMEOUT=${ZBX_TIMEOUT}
-ZBX_AGENT_HOSTNAME=${ZBX_AGENT_HOSTNAME}
+ZBX_SERVER_NAME=Zabbix Prod
+PHP_TZ=Europe/Madrid
+ZBX_DEBUGLEVEL=3
+ZBX_STARTDISCOVERERS=3
+ZBX_STARTPOLLERS=10
+ZBX_TIMEOUT=10
+ZBX_AGENT_HOSTNAME=docker-host
 EOF
-            echo "Generado .env:"
-            sed 's/\\(DB_PASS\\|DB_ROOT_PASS\\)=.*/\\1=****/g' .env | tee /dev/stderr
-          '''
+            echo "Generado $DEPLOY_PATH/.env:"
+            sed 's/\\(DB_PASS\\|DB_ROOT_PASS\\)=.*/\\1=****/g' $DEPLOY_PATH/.env
+          """
         }
       }
     }
 
-    stage('Pull imágenes') {
+    stage('Deploy') {
       steps {
-        sh '${DOCKER_COMPOSE} -f docker-compose.yml --project-directory "${COMPOSE_PROJECT_DIR}" pull'
-      }
-    }
-
-    stage('Desplegar (up -d)') {
-      steps {
-        sh '''
-          ${DOCKER_COMPOSE} -f docker-compose.yml --project-directory "${COMPOSE_PROJECT_DIR}" up -d
-          ${DOCKER_COMPOSE} ps
-        '''
+        sh """
+          cd $DEPLOY_PATH
+          docker-compose pull
+          docker-compose down || true
+          docker-compose up -d
+        """
       }
     }
 
     stage('Healthcheck UI') {
       steps {
         sh """
-          echo 'Comprobando UI en http://localhost:${WEB_PORT} ...'
           for i in \$(seq 1 24); do
-            if curl -fsS http://localhost:${WEB_PORT}/ >/dev/null; then
-              echo 'UI OK'
+            if curl -fsS http://localhost:8080/ >/dev/null; then
+              echo 'UI OK en http://localhost:8080'
               exit 0
             fi
-            echo "UI no disponible aún, reintentando (\$i/24)..."
-            sleep 5
+            echo 'UI aún no disponible, reintentando...'; sleep 5
           done
           echo 'ERROR: UI no respondió a tiempo' >&2
           exit 1
@@ -116,16 +86,12 @@ EOF
 
   post {
     success {
-      echo "Despliegue completado. Accede a http://<HOST>:${WEB_PORT} (Admin / zabbix)"
+      echo "Despliegue OK. Accede a http://<HOST>:8080 (Admin / zabbix)"
     }
     failure {
       sh 'docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Image}}" || true'
       sh 'docker logs zbx-server --tail=200 || true'
       sh 'docker logs zbx-web --tail=200 || true'
-      echo "Fallo en el despliegue. Revisa los logs anteriores."
-    }
-    always {
-      sh '${DOCKER_COMPOSE} ps || true'
     }
   }
 }
