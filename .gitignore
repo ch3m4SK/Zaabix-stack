@@ -1,0 +1,6 @@
+.env
+*.log
+# Volúmenes/artefactos locales
+zbx/snmptraps/*
+zbx/alertscripts/*.log
+zbx/externalscripts/*.log
