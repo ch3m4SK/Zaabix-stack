@@ -66,8 +66,8 @@ services:
       ZBX_SERVER_NAME: ${ZBX_SERVER_NAME:-Zabbix}
       PHP_TZ: ${PHP_TZ:-Europe/Madrid}
     ports:
-      - "8080:8080"
-      - "8443:8443"
+      - "${WEB_PORT:-8082}:8080"
+      - "${WEB_TLS_PORT:-8445}:8443"
     networks:
       - zbx-net
     healthcheck:

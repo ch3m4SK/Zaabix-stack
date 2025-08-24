@@ -3,13 +3,14 @@ pipeline {
 
   environment {
     DEPLOY_PATH = '/opt/zabbix-stack'
+    WEB_PORT = '8082'
+    WEB_TLS_PORT = '8445'
   }
 
   stages {
     stage('Preparar carpeta') {
       steps {
         sh """
-          mkdir -p $DEPLOY_PATH
           mkdir -p $DEPLOY_PATH/zbx/alertscripts \
                    $DEPLOY_PATH/zbx/externalscripts \
                    $DEPLOY_PATH/zbx/snmptraps \
@@ -20,12 +21,7 @@ pipeline {
 
     stage('Copiar archivos') {
       steps {
-        sh """
-          cp docker-compose.yml $DEPLOY_PATH/
-          # (opcional) copia docs/scripts si los quieres en el host
-          [ -d scripts ] && cp -r scripts $DEPLOY_PATH/ || true
-          [ -f .env.example ] && cp .env.example $DEPLOY_PATH/.env || true
-        """
+        sh "cp docker-compose.yml $DEPLOY_PATH/"
       }
     }
 
@@ -48,8 +44,9 @@ ZBX_STARTDISCOVERERS=3
 ZBX_STARTPOLLERS=10
 ZBX_TIMEOUT=10
 ZBX_AGENT_HOSTNAME=docker-host
+WEB_PORT=${WEB_PORT}
+WEB_TLS_PORT=${WEB_TLS_PORT}
 EOF
-            echo "Generado $DEPLOY_PATH/.env:"
             sed 's/\\(DB_PASS\\|DB_ROOT_PASS\\)=.*/\\1=****/g' $DEPLOY_PATH/.env
           """
         }
@@ -71,8 +68,8 @@ EOF
       steps {
         sh """
           for i in \$(seq 1 24); do
-            if curl -fsS http://localhost:8080/ >/dev/null; then
-              echo 'UI OK en http://localhost:8080'
+            if curl -fsS http://localhost:${WEB_PORT}/ >/dev/null; then
+              echo 'UI OK en http://localhost:${WEB_PORT}'
               exit 0
             fi
             echo 'UI aún no disponible, reintentando...'; sleep 5
@@ -86,7 +83,7 @@ EOF
 
   post {
     success {
-      echo "Despliegue OK. Accede a http://<HOST>:8080 (Admin / zabbix)"
+      echo "Despliegue OK. Accede a http://<HOST>:${WEB_PORT} (Admin/zabbix)"
     }
     failure {
       sh 'docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Image}}" || true'
