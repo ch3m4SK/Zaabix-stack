@@ -10,7 +10,7 @@ pipeline {
       steps {
         sh """
           cd $DEPLOY_PATH
-          docker compose up -d
+          docker-compose up -d
         """
       }
     }
